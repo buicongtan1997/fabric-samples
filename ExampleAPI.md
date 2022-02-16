@@ -20,3 +20,11 @@ go run assetTransfer.go
 
 # test api
 import ./asset-transfer-basic/application-gateway-go/API Hyperledger Example.postman_collection.json to postman
+
+# view db
+
+- localhost:7984/_utils/
+- localhost:5984/_utils
+
+admin / adminpw
+
