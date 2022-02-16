@@ -13,27 +13,43 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"path"
+	"strconv"
+	"time"
+
+	"github.com/gin-gonic/gin"
 	"github.com/hyperledger/fabric-gateway/pkg/client"
 	"github.com/hyperledger/fabric-gateway/pkg/identity"
 	gwproto "github.com/hyperledger/fabric-protos-go/gateway"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
-	"io/ioutil"
-	"log"
-	"path"
-	"time"
 )
+
+type Asset struct {
+	AppraisedValue int    `json:"appraisedValue"`
+	Color          string `json:"color"`
+	ID             string `json:"id"`
+	Owner          string `json:"owner"`
+	Size           int    `json:"size"`
+}
+
+type TransferAssetRequest struct {
+	ID    string `json:"id"`
+	Owner string `json:"owner"`
+}
 
 const (
 	mspID         = "Org1MSP"
 	cryptoPath    = "../../test-network/organizations/peerOrganizations/org1.example.com"
-	certPath      = cryptoPath + "/users/User1@org1.example.com/msp/signcerts/cert.pem"
+	certPath      = cryptoPath + "/users/User1@org1.example.com/msp/signcerts/User1@org1.example.com-cert.pem"
 	keyPath       = cryptoPath + "/users/User1@org1.example.com/msp/keystore/"
 	tlsCertPath   = cryptoPath + "/peers/peer0.org1.example.com/tls/ca.crt"
 	peerEndpoint  = "localhost:7051"
 	gatewayPeer   = "peer0.org1.example.com"
-	channelName   = "mychannel"
+	channelName   = "channel1"
 	chaincodeName = "basic"
 )
 
@@ -69,23 +85,86 @@ func main() {
 	network := gateway.GetNetwork(channelName)
 	contract := network.GetContract(chaincodeName)
 
-	fmt.Println("initLedger:")
-	initLedger(contract)
+	r := gin.Default()
+	r.GET("/initLedger", func(c *gin.Context) {
+		initLedger(contract)
+		c.JSON(200, gin.H{
+			"success": "ok",
+		})
+	})
 
-	fmt.Println("getAllAssets:")
-	getAllAssets(contract)
+	r.GET("/getAllAssets", func(c *gin.Context) {
+		data, err := getAllAssets(contract)
+		if err != nil {
+			c.JSON(200, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+		c.Status(200)
+		c.Writer.Write(data)
+	})
 
-	fmt.Println("createAsset:")
-	createAsset(contract)
+	r.POST("/createAsset", func(c *gin.Context) {
+		req := &Asset{}
+		err := c.ShouldBindJSON(req)
+		if err != nil {
+			c.JSON(200, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
 
-	fmt.Println("readAssetByID:")
-	readAssetByID(contract)
+		err = createAsset(contract, req)
+		if err != nil {
+			c.JSON(200, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
 
-	fmt.Println("transferAssetAsync:")
-	transferAssetAsync(contract)
+		c.JSON(200, gin.H{
+			"success": "ok",
+		})
+	})
 
-	fmt.Println("exampleErrorHandling:")
-	exampleErrorHandling(contract)
+	r.GET("/readAssetByID", func(c *gin.Context) {
+		id, _ := c.GetQuery("id")
+		data, err := readAssetByID(contract, id)
+		if err != nil {
+			c.JSON(200, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+		c.Status(200)
+		c.Writer.Write(data)
+	})
+
+	r.PUT("/transferAssetAsync", func(c *gin.Context) {
+		req := &TransferAssetRequest{}
+		err := c.ShouldBindJSON(req)
+		if err != nil {
+			c.JSON(200, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		err = transferAssetAsync(contract, req)
+		if err != nil {
+			c.JSON(200, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		c.JSON(200, gin.H{
+			"success": "ok",
+		})
+	})
+
+	r.Run()
 
 	log.Println("============ application-golang ends ============")
 }
@@ -173,65 +252,66 @@ func initLedger(contract *client.Contract) {
 }
 
 // Evaluate a transaction to query ledger state.
-func getAllAssets(contract *client.Contract) {
+func getAllAssets(contract *client.Contract) ([]byte, error) {
 	fmt.Println("Evaluate Transaction: GetAllAssets, function returns all the current assets on the ledger")
 
 	evaluateResult, err := contract.EvaluateTransaction("GetAllAssets")
 	if err != nil {
-		panic(fmt.Errorf("failed to evaluate transaction: %w", err))
+		return nil, fmt.Errorf("failed to evaluate transaction: %w", err)
 	}
-	result := formatJSON(evaluateResult)
 
-	fmt.Printf("*** Result:%s\n", result)
+	return evaluateResult, nil
 }
 
 // Submit a transaction synchronously, blocking until it has been committed to the ledger.
-func createAsset(contract *client.Contract) {
+func createAsset(contract *client.Contract, req *Asset) error {
 	fmt.Printf("Submit Transaction: CreateAsset, creates new asset with ID, Color, Size, Owner and AppraisedValue arguments \n")
 
-	_, err := contract.SubmitTransaction("CreateAsset", assetId, "yellow", "5", "Tom", "1300")
+	size := strconv.Itoa(req.Size)
+	appValues := strconv.Itoa(req.AppraisedValue)
+
+	_, err := contract.SubmitTransaction("CreateAsset", assetId, req.Color, size, req.Owner, appValues)
 	if err != nil {
-		panic(fmt.Errorf("failed to submit transaction: %w", err))
+		return fmt.Errorf("failed to submit transaction: %w", err)
 	}
 
-	fmt.Printf("*** Transaction committed successfully\n")
+	return nil
 }
 
 // Evaluate a transaction by assetID to query ledger state.
-func readAssetByID(contract *client.Contract) {
+func readAssetByID(contract *client.Contract, id string) ([]byte, error) {
 	fmt.Printf("Evaluate Transaction: ReadAsset, function returns asset attributes\n")
 
-	evaluateResult, err := contract.EvaluateTransaction("ReadAsset", assetId)
+	evaluateResult, err := contract.EvaluateTransaction("ReadAsset", id)
 	if err != nil {
-		panic(fmt.Errorf("failed to evaluate transaction: %w", err))
+		return nil, fmt.Errorf("failed to evaluate transaction: %w", err)
 	}
-	result := formatJSON(evaluateResult)
 
-	fmt.Printf("*** Result:%s\n", result)
+	return evaluateResult, nil
 }
 
 /*
 Submit transaction asynchronously, blocking until the transaction has been sent to the orderer, and allowing
 this thread to process the chaincode response (e.g. update a UI) without waiting for the commit notification
 */
-func transferAssetAsync(contract *client.Contract) {
+func transferAssetAsync(contract *client.Contract, req *TransferAssetRequest) error {
 	fmt.Printf("Async Submit Transaction: TransferAsset, updates existing asset owner'\n")
 
-	submitResult, commit, err := contract.SubmitAsync("TransferAsset", client.WithArguments(assetId, "Mark"))
+	submitResult, commit, err := contract.SubmitAsync("TransferAsset", client.WithArguments(req.ID, req.Owner))
 	if err != nil {
-		panic(fmt.Errorf("failed to submit transaction asynchronously: %w", err))
+		return fmt.Errorf("failed to submit transaction asynchronously: %w", err)
 	}
 
 	fmt.Printf("Successfully submitted transaction to transfer ownership from %s to Mark. \n", string(submitResult))
 	fmt.Println("Waiting for transaction commit.")
 
 	if status, err := commit.Status(); err != nil {
-		panic(fmt.Errorf("failed to get commit status: %w", err))
+		return fmt.Errorf("failed to get commit status: %w", err)
 	} else if !status.Successful {
-		panic(fmt.Errorf("transaction %s failed to commit with status: %d", status.TransactionID, int32(status.Code)))
+		return fmt.Errorf("transaction %s failed to commit with status: %d", status.TransactionID, int32(status.Code))
 	}
 
-	fmt.Printf("*** Transaction committed successfully\n")
+	return nil
 }
 
 // Submit transaction, passing in the wrong number of arguments ,expected to throw an error containing details of any error responses from the smart contract.

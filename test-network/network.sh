@@ -13,7 +13,7 @@
 # prepending $PWD/../bin to PATH to ensure we are picking up the correct binaries
 # this may be commented out to resolve installed version of tools if desired
 #
-# However using PWD in the path has the side effect that location that 
+# However using PWD in the path has the side effect that location that
 # this script is run from is critical. To ease this, get the directory
 # this script is actually in and infer location from there. (putting first)
 
@@ -251,13 +251,13 @@ function networkUp() {
   fi
 
   COMPOSE_FILES="-f compose/${COMPOSE_FILE_BASE} -f compose/${CONTAINER_CLI}/${CONTAINER_CLI}-${COMPOSE_FILE_BASE}"
-  
+
   if [ "${DATABASE}" == "couchdb" ]; then
     COMPOSE_FILES="${COMPOSE_FILES} -f compose/${COMPOSE_FILE_COUCH} -f compose/${CONTAINER_CLI}/${CONTAINER_CLI}-${COMPOSE_FILE_COUCH}"
   fi
 
   DOCKER_SOCK="${DOCKER_SOCK}" ${CONTAINER_CLI_COMPOSE} ${COMPOSE_FILES} up -d 2>&1
-  
+
   $CONTAINER_CLI ps -a
   if [ $? -ne 0 ]; then
     fatalln "Unable to start network"
@@ -375,7 +375,7 @@ CC_VERSION="1.0"
 # Chaincode definition sequence
 CC_SEQUENCE=1
 # default database
-DATABASE="leveldb"
+DATABASE="couchdb"
 
 # Get docker sock path from environment variable
 SOCK="${DOCKER_HOST:-/var/run/docker.sock}"
